@@ -1,0 +1,143 @@
+---
+title: 'HAR Practical Machine Learning: Qualitative Weight Lifting Study'
+author: "M.N.L"
+date: "1/15/2021"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  warning = FALSE, # show warnings during codebook generation
+  message = FALSE, # show messages during codebook generation
+  error = FALSE, # do not interrupt codebook generation in case of errors,
+                # usually better for debugging
+  echo = TRUE,  # show R code
+  fig.width = 8,
+  fig.height= 4,
+  fig.align = "center"
+)
+
+```
+
+## Executive Summary
+
+Using a wide variety of devices such as Jawbones and Fitbit, individuals take measurements of their activities so as to improve their health, measure their behavior or just because they are fascinated with new tech gadgets. To investigate how well a weight lifting activity is done, a qualitative study was conducted on 6 subjects by measuring different features that characterize a weight lifting activity. The study involved taking 10 repeated measurements for 5 different weight lifting movements of which 4 of the activities are wrong and one is correct. The five movements included "(Class A), throwing the elbows to the front (Class B), lifting the dumbbell only halfway (Class C), lowering the dumbbell only halfway (Class D) and throwing the hips to the front (Class E)".
+
+The data set consisted of approximately 20000 observations for 160 feature variables. The following steps were used to arrive at the final model
+
+1. The first step involved cleaning the data, and then selecting the appropriate variables
+2. Next, an exploratory analysis of the selected data variables was performed
+3. The performance of two cross validation methods was then evaluated
+4. The best cross validation method was selected and used to compare the performance of several machine models 
+5.The accuracy of each model was compared, and the best model was chosen to predict the test data.
+
+### Analysis
+#### Cleaning The Data
+Predictor variables obtained from the measurements taken by the accelerometers were selected. The total number of missing values in each column column was calculated and all predictor variables with a large number of missing values were deleted.
+```{r required libraries}
+library(ggplot2); library(caret); library(readr); library(dplyr); library(reshape2);library(plotly); library(magrittr);library(corrplot);library(kableExtra)
+
+HAR_training<-read_csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv")
+HAR_testing<-read_csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv")
+
+
+#Subset data with accelerometer
+classe<-as.factor(HAR_training$classe)
+HAR_training<-HAR_training[, grepl("acc", names(HAR_training))]
+HAR_testing<- HAR_testing[, grepl("acc", names(HAR_testing))]
+ht<-data.frame(HAR_training, classe)
+
+#Identifing the number of NAs in training columns
+n_missing<-t(data.frame(colSums(is.na(ht))))
+
+#Deleting columns with a large number of NA values
+ht<- ht[, c(-2,-7,-12,-17)]
+HAR_testing<-HAR_testing[, c(-2,-7,-12,-17)]
+
+```
+
+#### Exploratory Analysis
+A correlation plot was used to visualize the correlation between the chosen variables. Only 2 variables showed a very strong correlation with each other. This single instance should not significantly affect the determination of the final model and so, none of the predictor variables were removed.
+```{r exploratory Analysis}
+cordata<- as.matrix(cor(ht[,-17]) )
+corrplot(cordata, type = "upper", order = "hclust", 
+         tl.col = "black", tl.srt = 45)
+```
+### Cross-Validation Method Evaluation
+#### Split Cross Validation Method
+The performance of two cross-validation methods were compared. As shown below, the overall accuracy of the split cross validation method is 0.951.
+```{r cross validation split method}
+set.seed(125)
+
+#Create cross_validation from training set
+inTrain = createDataPartition(ht$classe, p = 3/4)[[1]]
+training = ht[ inTrain,]
+cv = ht[-inTrain,]
+
+model1<-train(classe~.,method='rf', data=training)
+rf_pred<-predict(model1,cv )
+table1_r<-table(rf_pred,cv$classe)
+c_rf<-confusionMatrix(table1_r)
+accuracy_rf<-confusionMatrix(table1_r)$overall["Accuracy"]
+kbl(c_rf$table) %>%
+  kable_styling(bootstrap_options = "striped", full_width = F, position = "center")
+kbl(c_rf$overall) %>%
+  kable_styling(bootstrap_options = "striped", full_width = F, position = "center")
+
+```
+Cross-validation method using the k-fold method showed an accuracy of about 0.93 which is slightly lower than the accuracy of the split cross validation method. Furthermore, the computation time for the k-fold validation was longer too.
+
+```{r k fold cross validation method}
+set.seed(125)
+tr_ctrl<-trainControl(method = "cv", number=5)
+model1_k<-train(classe~.,method='rf', trcontrol="tr_ctrl", data=training)
+confusionMatrix(model1_k)
+```
+### Model Analysis
+The Random Forest Model was then compared with 3 additional models - Boosting method, Linear Discriminant Analysis Method and the Stacking Method. The overall accuracy for the Boosting method is as follows:
+
+```{r Boosting Method}
+model2<-train(classe~.,method='gbm', data=training, verbose=FALSE)
+gbm_pred<-predict(model2,cv)
+table1_g<-table(gbm_pred,cv$classe)
+c_g<-confusionMatrix(table1_g)
+accuracy_g<-confusionMatrix(table1_g)$overall["Accuracy"]
+kbl(c_g$overall) %>%
+  kable_styling(bootstrap_options = "striped", full_width = F, position = "center")
+```
+The overall accuracy for the Linear Discriminant Analysis is as follows
+
+```{r Linear Discriminant Analysis}
+model3<-train(classe~.,method='lda', data=training)
+lda_pred<-predict(model3,cv)
+table1_l<-table(lda_pred,cv$classe)
+c_l<-confusionMatrix(table1_l)
+accuracy_l<-confusionMatrix(table1_l)$overall["Accuracy"]
+kbl(c_l$overall) %>%
+  kable_styling(bootstrap_options = "striped", full_width = F, position = "center")
+```
+Stacking method combined the predictor variables obtained from the 3 models and it used the random forest method to predict the new outcome. The overall accuracy is as follows
+
+```{r Combo Method}
+pred_combo<-data.frame(rf_pred, gbm_pred, lda_pred, cv$classe)
+comboModel<-train(cv.classe~., method='rf', data=pred_combo)
+comboModel_p<-predict(comboModel,pred_combo)
+table1_c<-table(comboModel_p,cv$classe)
+c_c<-confusionMatrix(table1_c)
+accuracy_c<-confusionMatrix(table1_c)$overall['Accuracy']
+kbl(c_c$overall) %>%
+  kable_styling(bootstrap_options = "striped", full_width = F, position = "center")
+```
+The selection of the best model was based on accuracy and efficiency. As seen in the table below, the accuracy of the random forest method and the stacking method is equal, and the highest among the other models. The Random Forest method was chosen as the best model since it took less time to run.
+
+```{r accuracy table}
+accuracy_comp<-data.frame("accuracy_rf"=c(accuracy_rf), "accuracy_g"=c(accuracy_g), "accuracy_l"=c(accuracy_l), "accuracy_c"=c(accuracy_c))
+kbl(accuracy_comp) %>%
+  kable_styling(bootstrap_options = "striped", full_width = F, position = "center")
+```
+
+### Conclusion
+The above analysis was made on a data set aimed at studying how well weight lifting is performed by 6 subjects. The data was cleaned and the relevant predictor variables selected. The effectiveness of two cross validation methods were evaluated and the split method was selected as the best. Four model methods were then evaluated using the split cross validation method. The random forest method showed the best performance among the other methods
+```
